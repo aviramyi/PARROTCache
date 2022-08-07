@@ -31,17 +31,19 @@ Example usage:
 # pylint: enable=line-too-long
 
 import os
+from typing import MutableMapping
 from absl import app
 from absl import flags
 from absl import logging
 
 import tensorflow as tf
 import tqdm
-import cache as cache_mod
+import multi_level_cache as multi_level_cache_mod
+from multi_level_cache import CACHE_MISS_INDEX
 import evict_trace as evict
-import memtrace
-from ..common import config as cfg
-from common import utils
+from ..cache import memtrace
+from policy_learning.common import config as cfg
+from policy_learning.common import utils
 
 FLAGS = flags.FLAGS
 flags.DEFINE_multi_string(
@@ -116,14 +118,16 @@ def main(_):
                     evict_trace.write(
                         evict.EvictionEntry(cache_access, eviction_decision))
 
-                cache = cache_mod.Cache.from_config(cache_config, trace=trace)
+                cache = multi_level_cache_mod.Cache.from_config(
+                    cache_config, trace=trace)
 
                 # Warm up cache
                 for _ in tqdm.tqdm(range(FLAGS.warmup_period), desc="Warming up cache"):
                     pc, address = trace.next()
                     hit = cache.read(pc, address, [write_to_eviction_trace])
 
-                    if not hit:
+                    # here the researcher can define what will be important for him to log
+                    if hit == CACHE_MISS_INDEX:
                         write_trace.write(pc, address)
 
                     if trace.done():
@@ -139,7 +143,8 @@ def main(_):
                         hit = cache.read(
                             pc, address, [write_to_eviction_trace])
 
-                        if not hit:
+                        # here the researcher can define what will be important for him to log
+                        if hit == CACHE_MISS_INDEX:
                             write_trace.write(pc, address)
 
                         num_reads += 1

@@ -13,13 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Defines a simple cache."""
+"""Defines a multi level simple cache."""
 
 import collections
+from functools import cache
+from sys import flags
+from typing import List
 import numpy as np
-import eviction_policy as eviction_policy_mod
-from . import eviction_policy as model_eviction_policy_mod
-from ..common import config as cfg
+from policy_learning.cache import eviction_policy as eviction_policy_mod
+from policy_learning.cache_model import eviction_policy as model_eviction_policy_mod
+from policy_learning.common import config as cfg
+
+CACHE_MISS_INDEX = -1
 
 
 class CacheSet(object):
@@ -129,8 +134,7 @@ class Cache(object):
     """A hierarchical cache. Reads from child cache if data not present."""
 
     @classmethod
-    def from_config(cls, config, eviction_policy=None, trace=None,
-                    hit_rate_statistic=None):
+    def from_config(cls, config, eviction_policy=None, trace=None):
         """Constructs Cache from config.
 
         Args:
@@ -197,12 +201,10 @@ class Cache(object):
             eviction_policy = eviction_policy_from_config(
                 config.get("eviction_policy"), trace)
         return cls(config.get("capacity"), eviction_policy,
-                   config.get("associativity"), config.get("cache_line_size"),
-                   hit_rate_statistic=hit_rate_statistic)
+                   config.get("associativity"), config.get("cache_line_size"))
 
-    def __init__(self, cache_capacity, eviction_policy, associativity,
-                 cache_line_size=64, child_cache=None, hit_rate_statistic=None,
-                 access_history_len=30):
+    def __init__(self, cache_capacity, eviction_policy, associativity, cache_level: int,
+                 cache_line_size=64, child_cache=None, access_history_len=30):
         """Constructs a hierarchical set-associative cache.
 
         Memory address is divided into:
@@ -259,9 +261,11 @@ class Cache(object):
         self._set_bits = set_bits
         self._cache_line_bits = cache_line_bits
         self._child_cache = child_cache
+        self._cache_level: int = cache_level
 
         if hit_rate_statistic is None:
-            hit_rate_statistic = BernoulliProcessStatistic()
+            hit_rate_statistic = LevelAwareBernoulliProcessStatistic(
+                lambda x: x <= 2)
         self._hit_rate_statistic = hit_rate_statistic
 
     def _align_address(self, address):
@@ -297,8 +301,10 @@ class Cache(object):
         aligned_address, set_id = self._align_address(address)
         hit = self._sets[set_id].read(pc, aligned_address, observers=observers)
         if not hit and self._child_cache is not None:
-            self._child_cache.read(pc, address)
-        self._hit_rate_statistic.trial(hit)
+            return self._child_cache.read(pc, address)
+        if not hit:
+          # not found at any cache level, which means we have a cache miss
+            return CACHE_MISS_INDEX
         return hit
 
     @property
@@ -328,16 +334,170 @@ class Cache(object):
         return "".join(s)
 
 
-class BernoulliProcessStatistic(object):
+class MultiLevelCache(object):
+    """A hierarchical multi level cache. Reads from child cache if data not present."""
+
+    @classmethod
+    def from_config(cls, config, trace=None, hit_rate_statistic=None):
+        """Constructs Cache from config.
+
+        Args:
+          config (Config): how the Cache is to be configured.
+          eviction_policy (EvictionPolicy | None): the eviction policy to use.
+            Constructs an EvictionPolicy from the config if None.
+          trace (MemoryTrace | None): the trace that the Cache is going to be
+            simulated on. Only needs to be specified if the eviction_policy is None.
+          hit_rate_statistic (BernoulliTrialStatistic | None): see constructor.
+
+        Returns:
+          array of Cache
+        """
+        def eviction_policy_from_config(config, trace):
+            """Returns the EvictionPolicy specified by the config.
+
+            Args:
+              config (Config): config for the eviction policy.
+              trace (MemoryTrace): memory trace to simulate on.
+
+            Returns:
+              EvictionPolicy
+            """
+            def scorer_from_config(config, trace):
+                """Creates an eviction_policy.CacheLineScorer from the config.
+
+                Args:
+                  config (Config): config for the cache line scorer.
+                  trace (MemoryTrace): see get_eviction_policy.
+
+                Returns:
+                  CacheLineScorer
+                """
+                scorer_type = config.get("type")
+                if scorer_type == "lru":
+                    return eviction_policy_mod.LRUScorer()
+                elif scorer_type == "belady":
+                    return eviction_policy_mod.BeladyScorer(trace)
+                elif scorer_type == "learned":
+                    with open(config.get("config_path"), "r") as model_config:
+                        return (model_eviction_policy_mod.LearnedScorer.
+                                from_model_checkpoint(cfg.Config.from_file(model_config),
+                                                      config.get("checkpoint")))
+                else:
+                    raise ValueError(
+                        "Invalid scorer type: {}".format(scorer_type))
+
+            policy_type = config.get("policy_type")
+            if policy_type == "greedy":
+                scorer = scorer_from_config(config.get("scorer"), trace)
+                return eviction_policy_mod.GreedyEvictionPolicy(
+                    scorer, config.get("n", 0))
+            elif policy_type == "random":
+                return eviction_policy_mod.RandomPolicy()
+            elif policy_type == "mixture":
+                subpolicies = [eviction_policy_from_config(subconfig, trace) for
+                               subconfig in config.get("subpolicies")]
+                return eviction_policy_mod.MixturePolicy(
+                    subpolicies, config.get("weights"))
+            else:
+                raise ValueError("Invalid policy type: {}".format(policy_type))
+
+        polices_config_array = config.get("levels_config_array")
+        cache_line_size = config.get("cache_line_size")
+        cache_levels_config = [polices_config_array[i]
+                               for i in range(len(polices_config_array))]
+        for config in cache_levels_config:
+            config["eviction_policy"] = eviction_policy_from_config(config)
+        return(cls(cache_levels_config,
+                   cache_line_size,
+                   hit_rate_statistic=hit_rate_statistic))
+
+    def __init__(self, cache_parameters_list, cache_line_size=64, hit_rate_statistic=None,
+                 access_history_len=30):
+        """Constructs a hierarchical multi-level set-associative cache.
+
+        Args:
+          cache_parameters_list (List(dict)): A list of parameters that will define the different cache levels.
+          cache_line_size (int): number of bytes per cache line.
+          hit_rate_statistic (BernoulliTrialStatistic | None): logs cache hits /
+            misses to this if provided. Defaults to vanilla
+            BernoulliProcessStatistic if not provided.
+          access_history_len (int): see CacheSet.
+        """
+
+        self._hit_rate_statistic = hit_rate_statistic
+        self._cache_levels: List(Cache) = []
+
+        # traversing in reverse from L(MAX) to L1 cache
+        previous_cache = None
+        for cache_level_index, cache_config in enumerate(cache_parameters_list.reverse()):
+            previous_cache = Cache(cache_config.get("capacity"),
+                                   cache_config.get("eviction_policy"),
+                                   cache_config.get("associativity"),
+                                   cache_level_index,
+                                   cache_line_size, previous_cache,
+                                   access_history_len)
+
+            self._cache_levels.append(previous_cache)
+
+    def read(self, pc, address, observers=None):
+        """Adds data at address to cache. Logs hit / miss to hit_rate_statistic.
+
+        Args:
+          pc (int): program counter of the memory access.
+          address (int): memory address to add to the cache.
+          observers (list[Callable] | None): each observer is called with:
+            - cache_access (CacheAccess): information about the current cache
+                access.
+            - eviction_decision (EvictionDecision): information about what cache
+                line was evicted.
+            observers are not called on reads in child caches.
+
+        Returns:
+          hit (int): The level of cache which contained the requested Value, or @CACHE_MISS_INDEX in case of a cache miss.
+        """
+        hit_level = self._cache_levels[0].read(pc, address, observers)
+        self._hit_rate_statistic.trial(hit_level != CACHE_MISS_INDEX)
+        return hit_level
+
+    @property
+    def hit_rate_statistic(self):
+        """Returns the hit_rate_statistic provided to the constructor.
+
+        Returns:
+          BernoulliProcessStatistic
+        """
+        return self._hit_rate_statistic
+
+    def set_eviction_policy(self, index: int, eviction_policy: eviction_policy_mod.EvictionPolicy):
+        """Changes the eviction policy to be the passed one.
+
+        Args:
+          eviction_policy (EvictionPolicy): the new eviction policy to use.
+        """
+        if index >= len(self._cache_levels) or index < 0:
+            raise Exception("invalid index provided for cache level")
+        self._cache_levels[index].set_eviction_policy(eviction_policy)
+
+    def __str__(self):
+        return "".join(s + "\n" for s in self._cache_levels)
+
+
+class LevelAwareBernoulliProcessStatistic(object):
     """Tracks results of Bernoulli trials."""
 
-    def __init__(self):
+    def __init__(self, evalutation_function):
+        self._evaluation_function = evalutation_function
         self.reset()
 
-    def trial(self, success):
+    def trial(self, level_of_hit: int):
         self._trials += 1
-        if success:
+        if self._evaluation_function(level_of_hit):
             self._successes += 1
+
+    def success_rate(self):
+        if self.num_trials == 0:
+            raise ValueError("Success rate is undefined when num_trials is 0.")
+        return self.num_successes / self.num_trials
 
     @property
     def num_trials(self):
@@ -346,11 +506,6 @@ class BernoulliProcessStatistic(object):
     @property
     def num_successes(self):
         return self._successes
-
-    def success_rate(self):
-        if self.num_trials == 0:
-            raise ValueError("Success rate is undefined when num_trials is 0.")
-        return self.num_successes / self.num_trials
 
     def reset(self):
         self._successes = 0

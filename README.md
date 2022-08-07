@@ -107,7 +107,7 @@ Example usage with Belady's as the policy, and default SPEC cache configs:
 
 ```
 # Current working directory is google_research
-python3 -m cache_replacement.policy_learning.cache.main \
+python3 -m policy_learning.cache.main \
   --experiment_base_dir=/tmp \
   --experiment_name=sample_belady_llc \
   --cache_configs=cache_replacement/policy_learning/cache/configs/default.json \
@@ -128,7 +128,7 @@ the sample trace:
 
 ```
 # Current working directory is google_research
-python3 -m cache_replacement.policy_learning.cache_model.main \
+python3 -m policy_learning.cache_model.main \
   --experiment_base_dir=/tmp \
   --experiment_name=sample_model_llc \
   --cache_configs=cache_replacement/policy_learning/cache/configs/default.json \
@@ -150,7 +150,7 @@ Training with the byte embedder model:
 
 ```
 # Current working directory is google_research
-python3 -m cache_replacement.policy_learning.cache_model.main \
+python3 -m policy_learning.cache_model.main \
   --experiment_base_dir=/tmp \
   --experiment_name=sample_model_llc \
   --cache_configs=cache_replacement/policy_learning/cache/configs/default.json \
@@ -165,7 +165,7 @@ Changing the history length to, e.g., 100:
 
 ```
 # Current working directory is google_research
-python3 -m cache_replacement.policy_learning.cache_model.main \
+python3 -m policy_learning.cache_model.main \
   --experiment_base_dir=/tmp \
   --experiment_name=sample_model_llc \
   --cache_configs=cache_replacement/policy_learning/cache/configs/default.json \
@@ -180,7 +180,7 @@ Ablating the reuse distance auxiliary loss:
 
 ```
 # Current working directory is google_research
-python3 -m cache_replacement.policy_learning.cache_model.main \
+python3 -m policy_learning.cache_model.main \
   --experiment_base_dir=/tmp \
   --experiment_name=sample_model_llc \
   --cache_configs=cache_replacement/policy_learning/cache/configs/default.json \
@@ -194,7 +194,7 @@ Ablating the ranking loss:
 
 ```
 # Current working directory is google_research
-python3 -m cache_replacement.policy_learning.cache_model.main \
+python3 -m policy_learning.cache_model.main \
   --experiment_base_dir=/tmp \
   --experiment_name=sample_model_llc \
   --cache_configs=cache_replacement/policy_learning/cache/configs/default.json \
@@ -208,7 +208,7 @@ Ablating DAgger:
 
 ```
 # Current working directory is google_research
-python3 -m cache_replacement.policy_learning.cache_model.main \
+python3 -m policy_learning.cache_model.main \
   --experiment_base_dir=/tmp \
   --experiment_name=sample_model_llc \
   --cache_configs=cache_replacement/policy_learning/cache/configs/default.json \
@@ -235,7 +235,7 @@ the trace `cache_replacement/policy_learning/cache/traces/sample_trace.csv`:
 
 ```
 # Current working directory is google_research
-python3 -m cache_replacement.policy_learning.cache.main \
+python3 -m policy_learning.cache.main \
   --experiment_base_dir=/tmp \
   --experiment_name=evaluate_checkpoint \
   --cache_configs="cache_replacement/policy_learning/cache/configs/default.json" \
