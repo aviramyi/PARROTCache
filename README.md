@@ -1,10 +1,13 @@
 # Introduction
 
-*Authors*: Evan Zheran Liu, Milad Hashemi, Kevin Swersky, Parthasarathy
+This repository is a fork of accompanying Source code of the ICML 2020 paper: [An Imitation Learning Approach for
+Cache Replacement](https://arxiv.org/abs/2006.16239).
+
+*Original Article Authors*: Evan Zheran Liu, Milad Hashemi, Kevin Swersky, Parthasarathy
 Ranganathan, Junwhan Ahn
 
-Source code accompanying our ICML 2020 paper: [An Imitation Learning Approach for
-Cache Replacement](https://arxiv.org/abs/2006.16239).
+We have forked this repo in order to add a multi-level cache framework, which can benefit future research on multi-level cache eviction using the article results and framework. 
+
 
 # Setup
 
